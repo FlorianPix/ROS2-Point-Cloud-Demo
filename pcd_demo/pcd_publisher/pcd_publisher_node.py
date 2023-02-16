@@ -10,8 +10,8 @@ import std_msgs.msg as std_msgs
 import numpy as np
 import open3d as o3d
 
-class PCDPublisher(Node):
 
+class PCDPublisher(Node):
     def __init__(self):
         super().__init__('pcd_publisher_node')
 
@@ -41,8 +41,6 @@ class PCDPublisher(Node):
         # the point cloud on each timer callback. 
         self.R = o3d.geometry.get_rotation_matrix_from_xyz([0, 0, np.pi/48])
 
-              
-                
     def timer_callback(self):
         # For visualization purposes, I rotate the point cloud with self.R 
         # to make it spin. 
@@ -54,6 +52,7 @@ class PCDPublisher(Node):
         self.pcd = point_cloud(self.points, 'map')
         # Then I publish the PointCloud2 object 
         self.pcd_publisher.publish(self.pcd)
+
 
 def point_cloud(points, parent_frame):
     """ Creates a point cloud message.
@@ -103,6 +102,7 @@ def point_cloud(points, parent_frame):
         data=data
     )
 
+
 def main(args=None):
     # Boilerplate code.
     rclpy.init(args=args)
@@ -114,6 +114,7 @@ def main(args=None):
     # when the garbage collector destroys the node object)
     pcd_publisher.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

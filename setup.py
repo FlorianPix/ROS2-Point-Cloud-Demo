@@ -30,7 +30,8 @@ setup(
     entry_points={
         'console_scripts': [
             'pcd_publisher_node = pcd_demo.pcd_publisher.pcd_publisher_node:main',
-            'pcd_subscriber_node = pcd_demo.pcd_subscriber.pcd_subscriber_node:main'
+            'pcd_subscriber_node = pcd_demo.pcd_subscriber.pcd_subscriber_node:main',
+            'pcd_to_ply_node = pcd_demo.pcd_to_ply.pcd_to_ply_node:main'
         ],
     },
 )

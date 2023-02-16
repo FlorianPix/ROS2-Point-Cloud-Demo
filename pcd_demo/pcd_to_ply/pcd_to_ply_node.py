@@ -1,3 +1,17 @@
+# Copyright 2016 Open Source Robotics Foundation, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import copy
 import sys
 from collections import namedtuple
@@ -12,6 +26,7 @@ import rclpy
 from rclpy.node import Node
 import sensor_msgs.msg as sensor_msgs
 from sensor_msgs.msg import PointCloud2, PointField
+from tf2_msgs.msg import TFMessage
 
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
@@ -30,10 +45,10 @@ _DATATYPES[PointField.UINT32]  = ('I', 4)
 _DATATYPES[PointField.FLOAT32] = ('f', 4)
 _DATATYPES[PointField.FLOAT64] = ('d', 8)
 
+class PcdToPly(Node):
 
-class PCDListener(Node):
     def __init__(self):
-        super().__init__('pcd_subsriber_node')
+        super().__init__('pcd2ply')
 
         self.pcd_topic = '/zed2i/zed_node/point_cloud/cloud_registered'  # 'pcd'
 
@@ -53,7 +68,7 @@ class PCDListener(Node):
 
         # point cloud subscription
         self.pcd_subscriber = self.create_subscription(
-            sensor_msgs.PointCloud2,    # Msg type
+            PointCloud2,                # Msg type
             self.pcd_topic,             # topic
             self.pcd_callback,          # callback function
             10                          # QoS
@@ -63,10 +78,19 @@ class PCDListener(Node):
         self.T_camera = np.eye(4)  # transform matrix from odom to zed2_left_camera_frame
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.timer = self.create_timer(0.1, self.tf_callback)
+        self.timer2 = self.create_timer(0.1, self.tf_callback)
 
         # active check
         self.t_last_pcd = self.get_clock().now()
+
+        self.tf_subscription = self.create_subscription(
+            TFMessage,
+            '/tf',
+            self.tf_callback,
+            10)
+
+        timer_period = 0.5  # seconds
+        self.timer = self.create_timer(timer_period, self.timer_callback)
 
     def pcd_callback(self, msg):
         # Here we convert the 'msg', which is of the type PointCloud2.
@@ -202,13 +226,15 @@ class PCDListener(Node):
 
         return fmt
 
+    def timer_callback(self):
+        pass
+
 
 def main(args=None):
-    # Boilerplate code.
     rclpy.init(args=args)
-    pcd_listener = PCDListener()
-    rclpy.spin(pcd_listener)
-    pcd_listener.destroy_node()
+    pcd_to_ply = PcdToPly()
+    rclpy.spin(pcd_to_ply)
+    pcd_to_ply.destroy_node()
     rclpy.shutdown()
 
 
