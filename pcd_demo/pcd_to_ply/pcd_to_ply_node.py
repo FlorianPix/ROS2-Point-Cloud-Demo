@@ -50,7 +50,7 @@ class PcdToPly(Node):
     def __init__(self):
         super().__init__('pcd2ply')
 
-        self.pcd_topic = '/zed2i/zed_node/point_cloud/cloud_registered'  # 'pcd'
+        self.pcd_topic = '/zed2/zed_node/point_cloud/cloud_registered'  # 'pcd'
 
         # visualisation init
         self.vis = o3d.visualization.Visualizer()
@@ -78,16 +78,9 @@ class PcdToPly(Node):
         self.T_camera = np.eye(4)  # transform matrix from odom to zed2_left_camera_frame
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.timer2 = self.create_timer(0.1, self.tf_callback)
 
         # active check
         self.t_last_pcd = self.get_clock().now()
-
-        self.tf_subscription = self.create_subscription(
-            TFMessage,
-            '/tf',
-            self.tf_callback,
-            10)
 
         timer_period = 0.5  # seconds
         self.timer = self.create_timer(timer_period, self.timer_callback)
@@ -99,33 +92,8 @@ class PcdToPly(Node):
         # https://github.com/ros/common_msgs/blob/noetic-devel/sensor_msgs/src/sensor_msgs/point_cloud2.py
         self.t_last_pcd = self.get_clock().now()
 
-        if not np.array_equal(self.T_camera, np.eye(4)):
-            pcd_as_numpy_array = np.array(list(self.read_points(msg)))
-            pcd_as_numpy_array = pcd_as_numpy_array[~np.isnan(pcd_as_numpy_array[:, 1])]
-            pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
-
-            self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
-            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.05)
-            self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
-            self.complete_o3d_pcd += self.o3d_pcd
-
-            # visualization
-            self.vis.remove_geometry(self.camera)
-            self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
-            self.vis.add_geometry(self.o3d_pcd)
-            self.vis.add_geometry(self.camera)
-
-        self.vis.poll_events()
-        self.vis.update_renderer()
-
-    def tf_callback(self):
-        if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
-            # save pcd to ply
-            p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
-            p.start()
-            exit()
-        from_frame_rel = 'odom'
-        to_frame_rel = 'base_link'
+        from_frame_rel = 'zed2_left_camera_frame'
+        to_frame_rel = 'world'
 
         try:
             t = self.tf_buffer.lookup_transform(
@@ -147,6 +115,32 @@ class PcdToPly(Node):
         self.T_camera[0, 3] = t.transform.translation.x
         self.T_camera[1, 3] = t.transform.translation.y
         self.T_camera[2, 3] = t.transform.translation.z
+
+        if not np.array_equal(self.T_camera, np.eye(4)):
+            pcd_as_numpy_array = np.array(list(self.read_points(msg)))
+            pcd_as_numpy_array = pcd_as_numpy_array[~np.isnan(pcd_as_numpy_array[:, 1])]
+            pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
+
+            self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
+            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.01)
+            self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
+            self.complete_o3d_pcd += self.o3d_pcd
+
+            # visualization
+            self.vis.remove_geometry(self.camera)
+            self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
+            self.vis.add_geometry(self.o3d_pcd)
+            self.vis.add_geometry(self.camera)
+
+        self.vis.poll_events()
+        self.vis.update_renderer()
+
+    def timer_callback(self):
+        if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
+            # save pcd to ply
+            p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
+            p.start()
+            exit()
 
     @staticmethod
     def write_pcd(pcd, output_folder):
@@ -225,9 +219,6 @@ class PcdToPly(Node):
                 offset += field.count * datatype_length
 
         return fmt
-
-    def timer_callback(self):
-        pass
 
 
 def main(args=None):
