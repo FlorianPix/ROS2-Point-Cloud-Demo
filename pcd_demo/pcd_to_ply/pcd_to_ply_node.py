@@ -92,45 +92,46 @@ class PcdToPly(Node):
         # https://github.com/ros/common_msgs/blob/noetic-devel/sensor_msgs/src/sensor_msgs/point_cloud2.py
         self.t_last_pcd = self.get_clock().now()
 
-        from_frame_rel = 'zed2_left_camera_frame'
-        to_frame_rel = 'world'
+        from_frame_rel = 'world'
+        to_frame_rel = 'zed2_left_camera_frame'
 
         try:
             t = self.tf_buffer.lookup_transform(
                 to_frame_rel,
                 from_frame_rel,
                 rclpy.time.Time())
+            self.T_camera = np.eye(4)
+            self.T_camera[:3, :3] = self.map.get_rotation_matrix_from_quaternion((
+                t.transform.rotation.x,
+                t.transform.rotation.y,
+                t.transform.rotation.z,
+                t.transform.rotation.w
+            ))
+            self.T_camera[0, 3] = t.transform.translation.x
+            self.T_camera[1, 3] = t.transform.translation.y
+            self.T_camera[2, 3] = t.transform.translation.z
+
+            self.get_logger().info(f'{self.T_camera}')
+
+            if not np.array_equal(self.T_camera, np.eye(4)):
+                pcd_as_numpy_array = np.array(list(self.read_points(msg)))
+                pcd_as_numpy_array = pcd_as_numpy_array[~np.isnan(pcd_as_numpy_array[:, 1])]
+                pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
+
+                self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
+                self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.01)
+                self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
+                self.complete_o3d_pcd += self.o3d_pcd
+
+                # visualization
+                self.vis.remove_geometry(self.camera)
+                self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
+                self.vis.add_geometry(self.o3d_pcd)
+                self.vis.add_geometry(self.camera)
         except TransformException as ex:
             self.get_logger().info(
                 f'Could not transform {to_frame_rel} to {from_frame_rel}: {ex}')
             return
-
-        self.T_camera = np.eye(4)
-        self.T_camera[:3, :3] = self.map.get_rotation_matrix_from_quaternion((
-            t.transform.rotation.x,
-            t.transform.rotation.y,
-            t.transform.rotation.z,
-            t.transform.rotation.w
-        ))
-        self.T_camera[0, 3] = t.transform.translation.x
-        self.T_camera[1, 3] = t.transform.translation.y
-        self.T_camera[2, 3] = t.transform.translation.z
-
-        if not np.array_equal(self.T_camera, np.eye(4)):
-            pcd_as_numpy_array = np.array(list(self.read_points(msg)))
-            pcd_as_numpy_array = pcd_as_numpy_array[~np.isnan(pcd_as_numpy_array[:, 1])]
-            pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
-
-            self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
-            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.01)
-            self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
-            self.complete_o3d_pcd += self.o3d_pcd
-
-            # visualization
-            self.vis.remove_geometry(self.camera)
-            self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
-            self.vis.add_geometry(self.o3d_pcd)
-            self.vis.add_geometry(self.camera)
 
         self.vis.poll_events()
         self.vis.update_renderer()
