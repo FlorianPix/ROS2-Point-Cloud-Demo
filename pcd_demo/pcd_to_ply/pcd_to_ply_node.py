@@ -45,12 +45,12 @@ _DATATYPES[PointField.UINT32]  = ('I', 4)
 _DATATYPES[PointField.FLOAT32] = ('f', 4)
 _DATATYPES[PointField.FLOAT64] = ('d', 8)
 
-class PcdToPly(Node):
 
+class PcdToPly(Node):
     def __init__(self):
         super().__init__('pcd2ply')
 
-        self.pcd_topic = '/zed2/zed_node/point_cloud/cloud_registered'  # 'pcd'
+        self.pcd_topic = '/depth_camera/points'  # '/zed2/zed_node/point_cloud/cloud_registered'
 
         # visualisation init
         self.vis = o3d.visualization.Visualizer()
@@ -93,7 +93,7 @@ class PcdToPly(Node):
         self.t_last_pcd = self.get_clock().now()
 
         from_frame_rel = 'world'
-        to_frame_rel = 'zed2_left_camera_frame'
+        to_frame_rel = 'tool0'  # 'zed2_left_camera_frame'
 
         try:
             t = self.tf_buffer.lookup_transform(
@@ -110,8 +110,6 @@ class PcdToPly(Node):
             self.T_camera[0, 3] = t.transform.translation.x
             self.T_camera[1, 3] = t.transform.translation.y
             self.T_camera[2, 3] = t.transform.translation.z
-
-            self.get_logger().info(f'{self.T_camera}')
 
             if not np.array_equal(self.T_camera, np.eye(4)):
                 pcd_as_numpy_array = np.array(list(self.read_points(msg)))
