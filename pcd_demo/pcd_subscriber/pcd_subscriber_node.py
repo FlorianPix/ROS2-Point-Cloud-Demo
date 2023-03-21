@@ -35,7 +35,7 @@ class PCDListener(Node):
     def __init__(self):
         super().__init__('pcd_subsriber_node')
 
-        self.pcd_topic = '/zed2i/zed_node/point_cloud/cloud_registered'  # 'pcd'
+        self.pcd_topic = '/depth_camera/points'  # '/zed2/zed_node/point_cloud/cloud_registered'
 
         # visualisation init
         self.vis = o3d.visualization.Visualizer()
@@ -53,7 +53,7 @@ class PCDListener(Node):
 
         # point cloud subscription
         self.pcd_subscriber = self.create_subscription(
-            sensor_msgs.PointCloud2,    # Msg type
+            PointCloud2,                # Msg type
             self.pcd_topic,             # topic
             self.pcd_callback,          # callback function
             10                          # QoS
@@ -81,7 +81,7 @@ class PCDListener(Node):
             pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
 
             self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
-            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.05)
+            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.001)
             self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
             self.complete_o3d_pcd += self.o3d_pcd
 
@@ -100,8 +100,8 @@ class PCDListener(Node):
             p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
             p.start()
             exit()
-        from_frame_rel = 'odom'
-        to_frame_rel = 'base_link'
+        from_frame_rel = 'world'
+        to_frame_rel = 'depth_camera/link/depth_camera1'
 
         try:
             t = self.tf_buffer.lookup_transform(

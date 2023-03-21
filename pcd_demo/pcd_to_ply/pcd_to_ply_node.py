@@ -1,17 +1,3 @@
-# Copyright 2016 Open Source Robotics Foundation, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import copy
 import sys
 from collections import namedtuple
@@ -26,7 +12,6 @@ import rclpy
 from rclpy.node import Node
 import sensor_msgs.msg as sensor_msgs
 from sensor_msgs.msg import PointCloud2, PointField
-from tf2_msgs.msg import TFMessage
 
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
@@ -78,12 +63,10 @@ class PcdToPly(Node):
         self.T_camera = np.eye(4)  # transform matrix from odom to zed2_left_camera_frame
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.timer = self.create_timer(0.05, self.tf_callback)
 
         # active check
         self.t_last_pcd = self.get_clock().now()
-
-        timer_period = 0.5  # seconds
-        self.timer = self.create_timer(timer_period, self.timer_callback)
 
     def pcd_callback(self, msg):
         # Here we convert the 'msg', which is of the type PointCloud2.
@@ -92,54 +75,54 @@ class PcdToPly(Node):
         # https://github.com/ros/common_msgs/blob/noetic-devel/sensor_msgs/src/sensor_msgs/point_cloud2.py
         self.t_last_pcd = self.get_clock().now()
 
+        if not np.array_equal(self.T_camera, np.eye(4)):
+            pcd_as_numpy_array = np.array(list(self.read_points(msg)))
+            pcd_as_numpy_array = pcd_as_numpy_array[~np.isnan(pcd_as_numpy_array[:, 1])]
+            pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
+
+            self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
+            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.001)
+            self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
+            self.complete_o3d_pcd += self.o3d_pcd
+
+            # visualization
+            self.vis.remove_geometry(self.camera)
+            self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
+            self.vis.add_geometry(self.o3d_pcd)
+            self.vis.add_geometry(self.camera)
+
+        self.vis.poll_events()
+        self.vis.update_renderer()
+
+    def tf_callback(self):
+        if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
+            # save pcd to ply
+            p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
+            p.start()
+            exit()
         from_frame_rel = 'world'
-        to_frame_rel = 'tool0'  # 'zed2_left_camera_frame'
+        to_frame_rel = 'depth_camera/link/depth_camera1'
 
         try:
             t = self.tf_buffer.lookup_transform(
                 to_frame_rel,
                 from_frame_rel,
                 rclpy.time.Time())
-            self.T_camera = np.eye(4)
-            self.T_camera[:3, :3] = self.map.get_rotation_matrix_from_quaternion((
-                t.transform.rotation.x,
-                t.transform.rotation.y,
-                t.transform.rotation.z,
-                t.transform.rotation.w
-            ))
-            self.T_camera[0, 3] = t.transform.translation.x
-            self.T_camera[1, 3] = t.transform.translation.y
-            self.T_camera[2, 3] = t.transform.translation.z
-
-            if not np.array_equal(self.T_camera, np.eye(4)):
-                pcd_as_numpy_array = np.array(list(self.read_points(msg)))
-                pcd_as_numpy_array = pcd_as_numpy_array[~np.isnan(pcd_as_numpy_array[:, 1])]
-                pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
-
-                self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
-                self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.01)
-                self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
-                self.complete_o3d_pcd += self.o3d_pcd
-
-                # visualization
-                self.vis.remove_geometry(self.camera)
-                self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
-                self.vis.add_geometry(self.o3d_pcd)
-                self.vis.add_geometry(self.camera)
         except TransformException as ex:
             self.get_logger().info(
                 f'Could not transform {to_frame_rel} to {from_frame_rel}: {ex}')
             return
 
-        self.vis.poll_events()
-        self.vis.update_renderer()
-
-    def timer_callback(self):
-        if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
-            # save pcd to ply
-            p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
-            p.start()
-            exit()
+        self.T_camera = np.eye(4)
+        self.T_camera[:3, :3] = self.map.get_rotation_matrix_from_quaternion((
+            t.transform.rotation.w,
+            t.transform.rotation.x,
+            t.transform.rotation.y,
+            t.transform.rotation.z
+        ))
+        self.T_camera[0, 3] = t.transform.translation.x
+        self.T_camera[1, 3] = t.transform.translation.y
+        self.T_camera[2, 3] = t.transform.translation.z
 
     @staticmethod
     def write_pcd(pcd, output_folder):

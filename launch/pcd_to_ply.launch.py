@@ -10,5 +10,5 @@ def generate_launch_description():
         Node(
             package='pcd_demo',
             executable='pcd_to_ply_node',
-            name='pcd_to_ply'),
+            name='pcd_to_ply_node'),
   ])
