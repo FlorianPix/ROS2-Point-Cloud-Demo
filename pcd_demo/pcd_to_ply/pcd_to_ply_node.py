@@ -35,7 +35,7 @@ class PcdToPly(Node):
     def __init__(self):
         super().__init__('pcd2ply')
 
-        self.pcd_topic = '/depth_camera/points'  # '/zed2/zed_node/point_cloud/cloud_registered'
+        self.pcd_topic = '/zed2/zed_node/point_cloud/cloud_registered'  # '/depth_camera/points'
 
         # visualisation init
         self.vis = o3d.visualization.Visualizer()
@@ -63,45 +63,19 @@ class PcdToPly(Node):
         self.T_camera = np.eye(4)  # transform matrix from odom to zed2_left_camera_frame
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.timer = self.create_timer(0.05, self.tf_callback)
+        self.timer = self.create_timer(0.1, self.timer_callback)
 
         # active check
         self.t_last_pcd = self.get_clock().now()
 
     def pcd_callback(self, msg):
-        # Here we convert the 'msg', which is of the type PointCloud2.
-        # I ported the function read_points2 from 
-        # the ROS1 package. 
-        # https://github.com/ros/common_msgs/blob/noetic-devel/sensor_msgs/src/sensor_msgs/point_cloud2.py
-        self.t_last_pcd = self.get_clock().now()
-
-        if not np.array_equal(self.T_camera, np.eye(4)):
-            pcd_as_numpy_array = np.array(list(self.read_points(msg)))
-            pcd_as_numpy_array = pcd_as_numpy_array[~np.isnan(pcd_as_numpy_array[:, 1])]
-            pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
-
-            self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
-            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.001)
-            self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
-            self.complete_o3d_pcd += self.o3d_pcd
-
-            # visualization
-            self.vis.remove_geometry(self.camera)
-            self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
-            self.vis.add_geometry(self.o3d_pcd)
-            self.vis.add_geometry(self.camera)
-
-        self.vis.poll_events()
-        self.vis.update_renderer()
-
-    def tf_callback(self):
         if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
             # save pcd to ply
             p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
             p.start()
             exit()
         from_frame_rel = 'world'
-        to_frame_rel = 'depth_camera/link/depth_camera1'
+        to_frame_rel = 'zed2_left_camera_frame'  # 'depth_camera/link/depth_camera1'
 
         try:
             t = self.tf_buffer.lookup_transform(
@@ -123,6 +97,51 @@ class PcdToPly(Node):
         self.T_camera[0, 3] = t.transform.translation.x
         self.T_camera[1, 3] = t.transform.translation.y
         self.T_camera[2, 3] = t.transform.translation.z
+        self.t_last_pcd = self.get_clock().now()
+
+        if not np.array_equal(self.T_camera, np.eye(4)):
+            pcd_as_numpy_array = np.array(list(self.read_points(msg)))
+            pcd_as_numpy_array = pcd_as_numpy_array[~np.isnan(pcd_as_numpy_array[:, 1])]
+            pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
+
+            self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
+            self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
+
+            # crop
+            x_min, y_min, z_min = -0.3, -0.3, -0.15
+            x_max, y_max, z_max = 1.5, 2.0, 1.2
+            bounding_polygon = np.array([
+                [x_min, 0.0, z_min],
+                [x_min, 0.0, z_max],
+                [x_max, 0.0, z_max],
+                [x_max, 0.0, z_min]
+            ]).astype("float64")
+            vol = o3d.visualization.SelectionPolygonVolume()
+            vol.bounding_polygon = o3d.utility.Vector3dVector(bounding_polygon)
+            vol.axis_max = y_max
+            vol.axis_min = y_min
+            vol.orthogonal_axis = "Y"
+            self.o3d_pcd = vol.crop_point_cloud(self.o3d_pcd)
+
+            # union and down sample
+            self.complete_o3d_pcd += self.o3d_pcd
+            self.complete_o3d_pcd = self.complete_o3d_pcd.voxel_down_sample(voxel_size=0.01)
+
+            # visualization
+            self.vis.remove_geometry(self.camera)
+            self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
+            self.vis.add_geometry(self.o3d_pcd)
+            self.vis.add_geometry(self.camera)
+
+        self.vis.poll_events()
+        self.vis.update_renderer()
+
+    def timer_callback(self):
+        if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
+            # save pcd to ply
+            p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
+            p.start()
+            exit()
 
     @staticmethod
     def write_pcd(pcd, output_folder):
