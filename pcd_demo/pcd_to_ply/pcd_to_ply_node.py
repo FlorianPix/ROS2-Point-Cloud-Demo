@@ -20,31 +20,80 @@ from tf2_ros.transform_listener import TransformListener
 import numpy as np
 import open3d as o3d
 
-_DATATYPES = {}
-_DATATYPES[PointField.INT8]    = ('b', 1)
-_DATATYPES[PointField.UINT8]   = ('B', 1)
-_DATATYPES[PointField.INT16]   = ('h', 2)
-_DATATYPES[PointField.UINT16]  = ('H', 2)
-_DATATYPES[PointField.INT32]   = ('i', 4)
-_DATATYPES[PointField.UINT32]  = ('I', 4)
-_DATATYPES[PointField.FLOAT32] = ('f', 4)
-_DATATYPES[PointField.FLOAT64] = ('d', 8)
+_DATATYPES = {PointField.INT8: ('b', 1), PointField.UINT8: ('B', 1), PointField.INT16: ('h', 2),
+              PointField.UINT16: ('H', 2), PointField.INT32: ('i', 4), PointField.UINT32: ('I', 4),
+              PointField.FLOAT32: ('f', 4), PointField.FLOAT64: ('d', 8)}
+
+
+def _get_struct_fmt(is_big_endian, fields, field_names=None):
+    fmt = '>' if is_big_endian else '<'
+
+    offset = 0
+    for field in (f for f in sorted(fields, key=lambda f: f.offset) if
+                  field_names is None or f.name in field_names):
+        if offset < field.offset:
+            fmt += 'x' * (field.offset - offset)
+            offset = field.offset
+        if field.datatype not in _DATATYPES:
+            print('Skipping unknown PointField datatype [%d]' % field.datatype, file=sys.stderr)
+        else:
+            datatype_fmt, datatype_length = _DATATYPES[field.datatype]
+            fmt += field.count * datatype_fmt
+            offset += field.count * datatype_length
+
+    return fmt
+
+
+def read_points(cloud, field_names=None):
+    """
+    Read points from a L{sensor_msgs.PointCloud2} message.
+
+    @param cloud: The point cloud to read from.
+    @type  cloud: L{sensor_msgs.PointCloud2}
+    @param field_names: The names of fields to read. If None, read all fields. [default: None]
+    @type  field_names: iterable
+    @return: Generator which yields a list of values for each point.
+    @rtype:  generator
+    """
+    assert isinstance(cloud, PointCloud2), 'cloud is not a sensor_msgs.msg.PointCloud2'
+    fmt = _get_struct_fmt(cloud.is_bigendian, cloud.fields, field_names)
+    width, height, point_step, row_step, data = cloud.width, cloud.height, cloud.point_step, cloud.row_step, cloud.data
+    isnan, isinf = math.isnan, math.isinf
+    unpack_from = struct.Struct(fmt).unpack_from
+
+    for v in range(height):
+        offset = row_step * v
+        for u in range(width):
+            p = unpack_from(data, offset)
+            has_nan = False
+            has_inf = False
+            for pv in p:
+                if isnan(pv):
+                    has_nan = True
+                    break
+                if isinf(pv):
+                    has_inf = True
+                    break
+            if not has_nan and not has_inf:
+                yield p[0], p[1], p[2], p[3] * math.pow(10, 40) / 256
+            offset += point_step
 
 
 class PcdToPly(Node):
     def __init__(self):
         super().__init__('pcd2ply')
 
-        self.pcd_topic = '/zed2/zed_node/point_cloud/cloud_registered'  # '/depth_camera/points'
+        self.pcd_topic = '/depth_camera/points'  # '/zed2/zed_node/point_cloud/cloud_registered'
 
         # visualisation init
         self.vis = o3d.visualization.Visualizer()
         self.vis.create_window()
         self.o3d_pcd = o3d.geometry.PointCloud()
         self.complete_o3d_pcd = o3d.geometry.PointCloud()
-        self.map = o3d.geometry.TriangleMesh.create_coordinate_frame()
+        self.map = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
         self.vis.add_geometry(self.map)
-        self.camera = o3d.geometry.TriangleMesh.create_coordinate_frame()
+        self.vis.add_geometry(self.complete_o3d_pcd)
+        self.camera = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
 
         # create output folder
         dt_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -75,7 +124,7 @@ class PcdToPly(Node):
             p.start()
             exit()
         from_frame_rel = 'world'
-        to_frame_rel = 'zed2_left_camera_frame'  # 'depth_camera/link/depth_camera1'
+        to_frame_rel = 'depth_camera/link/depth_camera1'  # 'zed2_left_camera_frame'
 
         try:
             t = self.tf_buffer.lookup_transform(
@@ -100,16 +149,23 @@ class PcdToPly(Node):
         self.t_last_pcd = self.get_clock().now()
 
         if not np.array_equal(self.T_camera, np.eye(4)):
-            pcd_as_numpy_array = np.array(list(self.read_points(msg)))
-            pcd_as_numpy_array = pcd_as_numpy_array[~np.isnan(pcd_as_numpy_array[:, 1])]
-            pcd_as_numpy_array = pcd_as_numpy_array[~np.isinf(pcd_as_numpy_array[:, 1])]
+            pcd = np.array(list(read_points(msg)))
+            points = pcd[:, :3]
+            rgb = pcd[:, 3]
+            r = np.array([(int(color * (1 << 16)) & 0xff) / 255 for color in rgb])
+            g = np.array([(int(color * (1 << 8)) & 0xff) / 255 for color in rgb])
+            b = np.array([(int(color) & 0xff) / 255 for color in rgb])
+            colors = np.array([r, g, b])
+            x, y = colors.shape
+            colors = np.reshape(colors, (y, x))
 
-            self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd_as_numpy_array))
+            self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+            self.o3d_pcd.colors = o3d.utility.Vector3dVector(colors)
             self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
 
             # crop
-            x_min, y_min, z_min = -0.3, -0.3, -0.15
-            x_max, y_max, z_max = 1.5, 2.0, 1.2
+            x_min, y_min, z_min = -1.3, -1.3, -0.15
+            x_max, y_max, z_max = 2.5, 3.0, 2.2
             bounding_polygon = np.array([
                 [x_min, 0.0, z_min],
                 [x_min, 0.0, z_max],
@@ -122,16 +178,21 @@ class PcdToPly(Node):
             vol.axis_min = y_min
             vol.orthogonal_axis = "Y"
             self.o3d_pcd = vol.crop_point_cloud(self.o3d_pcd)
+            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.005)
 
             # union and down sample
             self.complete_o3d_pcd += self.o3d_pcd
-            self.complete_o3d_pcd = self.complete_o3d_pcd.voxel_down_sample(voxel_size=0.01)
 
             # visualization
             self.vis.remove_geometry(self.camera)
             self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
             self.vis.add_geometry(self.o3d_pcd)
             self.vis.add_geometry(self.camera)
+            ctr = self.vis.get_view_control()
+            ctr.set_up((0, 0, 1))  # set the positive direction of the z-axis as the up direction
+            ctr.set_front((-1, 0, 0))  # set the negative direction of the x-axis toward you
+            ctr.set_lookat((0, 0, 1))  # set the original point as the center point of the window
+            ctr.set_zoom(0.5)
 
         self.vis.poll_events()
         self.vis.update_renderer()
@@ -147,79 +208,6 @@ class PcdToPly(Node):
     def write_pcd(pcd, output_folder):
         dt_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
         o3d.io.write_point_cloud(f'{output_folder}/{dt_str}.ply', pcd, write_ascii=True)
-
-    def read_points(self, cloud, field_names=None, skip_nans=True, uvs=[]):
-        """
-        Read points from a L{sensor_msgs.PointCloud2} message.
-
-        @param cloud: The point cloud to read from.
-        @type  cloud: L{sensor_msgs.PointCloud2}
-        @param field_names: The names of fields to read. If None, read all fields. [default: None]
-        @type  field_names: iterable
-        @param skip_nans: If True, then don't return any point with a NaN value.
-        @type  skip_nans: bool [default: False]
-        @param uvs: If specified, then only return the points at the given coordinates. [default: empty list]
-        @type  uvs: iterable
-        @return: Generator which yields a list of values for each point.
-        @rtype:  generator
-        """
-        assert isinstance(cloud, PointCloud2), 'cloud is not a sensor_msgs.msg.PointCloud2'
-        fmt = self._get_struct_fmt(cloud.is_bigendian, cloud.fields, field_names)
-        width, height, point_step, row_step, data, isnan = cloud.width, cloud.height, cloud.point_step, cloud.row_step, cloud.data, math.isnan
-        unpack_from = struct.Struct(fmt).unpack_from
-
-        if skip_nans:
-            if uvs:
-                for u, v in uvs:
-                    p = unpack_from(data, (row_step * v) + (point_step * u))
-                    has_nan = False
-                    for pv in p:
-                        if isnan(pv):
-                            has_nan = True
-                            break
-                    if not has_nan:
-                        yield p[:3]
-            else:
-                for v in range(height):
-                    offset = row_step * v
-                    for u in range(width):
-                        p = unpack_from(data, offset)
-                        has_nan = False
-                        for pv in p:
-                            if isnan(pv):
-                                has_nan = True
-                                break
-                        if not has_nan:
-                            yield p[:3]
-                        offset += point_step
-        else:
-            if uvs:
-                for u, v in uvs:
-                    yield unpack_from(data, (row_step * v) + (point_step * u))[:3]
-            else:
-                for v in range(height):
-                    offset = row_step * v
-                    for u in range(width):
-                        yield unpack_from(data, offset)[:3]
-                        offset += point_step
-
-    def _get_struct_fmt(self, is_bigendian, fields, field_names=None):
-        fmt = '>' if is_bigendian else '<'
-
-        offset = 0
-        for field in (f for f in sorted(fields, key=lambda f: f.offset) if
-                      field_names is None or f.name in field_names):
-            if offset < field.offset:
-                fmt += 'x' * (field.offset - offset)
-                offset = field.offset
-            if field.datatype not in _DATATYPES:
-                print('Skipping unknown PointField datatype [%d]' % field.datatype, file=sys.stderr)
-            else:
-                datatype_fmt, datatype_length = _DATATYPES[field.datatype]
-                fmt += field.count * datatype_fmt
-                offset += field.count * datatype_length
-
-        return fmt
 
 
 def main(args=None):
