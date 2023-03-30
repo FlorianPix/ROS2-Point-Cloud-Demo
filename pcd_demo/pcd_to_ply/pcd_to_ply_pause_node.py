@@ -179,6 +179,7 @@ class PcdToPlyPause(Node):
         self.t_last_pcd = self.get_clock().now()
 
     def pcd_callback(self, msg):
+        start_t = self.get_clock().now()
         if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
             # save pcd to ply
             p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
@@ -265,6 +266,9 @@ class PcdToPlyPause(Node):
 
         self.vis.poll_events()
         self.vis.update_renderer()
+        end_t = self.get_clock().now()
+        self.get_logger().info(f'{len(self.complete_o3d_pcd.points)}')
+        self.get_logger().info(f'{end_t - start_t}')
 
     def timer_callback(self):
         if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
