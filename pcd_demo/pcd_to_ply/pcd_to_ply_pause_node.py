@@ -3,6 +3,8 @@ import sys
 from collections import namedtuple
 import ctypes
 import math
+from functools import partial
+from math import sin, cos, pi
 import struct
 import os
 from datetime import datetime
@@ -93,11 +95,55 @@ def compare_tf(t1, t2, delta_q=0.0000001, delta_t=0.005):
     return approx_same
 
 
+def rotate(pt, theta):
+    x = pt[0] * cos(theta) - pt[1] * sin(theta)
+    y = pt[0] * sin(theta) + pt[1] * cos(theta)
+    z = pt[2]
+    return [x, y, z]
+
+
+def translate(pt, off):
+    return pt[0] + off[0], pt[1] + off[1], pt[2]
+
+
 class PcdToPlyPause(Node):
     def __init__(self):
-        super().__init__('pcd2ply_pause')
+        super().__init__('pcd_to_ply_pause_node')
 
-        self.pcd_topic = '/depth_camera/points'  # '/zed2/zed_node/point_cloud/cloud_registered'
+        self.declare_parameters(
+            namespace='',
+            parameters=[
+                ('pcd_topic', None),
+                ('camera_tf_frame', None),
+                ('voxel_size', None),
+                ('cropping.x_width', None),
+                ('cropping.y_width', None),
+                ('cropping.theta', None),
+                ('cropping.x_off', None),
+                ('cropping.y_off', None),
+                ('cropping.z_min', None),
+                ('cropping.z_max', None),
+                ('vis_camera.up_vector', None),
+                ('vis_camera.front_vector', None),
+                ('vis_camera.center', None),
+                ('vis_camera.zoom', None)
+            ])
+
+        # get parameters
+        self.pcd_topic = self.get_parameter('pcd_topic').get_parameter_value().string_value
+        self.camera_tf_frame = self.get_parameter('camera_tf_frame').get_parameter_value().string_value
+        self.voxel_size = self.get_parameter('voxel_size').get_parameter_value().double_value
+        self.x_width = self.get_parameter('cropping.x_width').get_parameter_value().double_value
+        self.y_width = self.get_parameter('cropping.y_width').get_parameter_value().double_value
+        self.theta = self.get_parameter('cropping.theta').get_parameter_value().double_value
+        self.x_off = self.get_parameter('cropping.x_off').get_parameter_value().double_value
+        self.y_off = self.get_parameter('cropping.y_off').get_parameter_value().double_value
+        self.z_min = self.get_parameter('cropping.z_min').get_parameter_value().double_value
+        self.z_max = self.get_parameter('cropping.z_max').get_parameter_value().double_value
+        self.up_vector = np.array(self.get_parameter('vis_camera.up_vector').get_parameter_value().double_array_value)
+        self.front_vector = np.array(self.get_parameter('vis_camera.front_vector').get_parameter_value().double_array_value)
+        self.center = np.array(self.get_parameter('vis_camera.center').get_parameter_value().double_array_value)
+        self.zoom = self.get_parameter('vis_camera.zoom').get_parameter_value().double_value
 
         # visualisation init
         self.vis = o3d.visualization.Visualizer()
@@ -122,8 +168,8 @@ class PcdToPlyPause(Node):
             10                          # QoS
         )
 
-        # transform init
-        self.T_camera = np.eye(4)  # transform matrix from odom to zed2_left_camera_frame
+        # init transform
+        self.T_camera = np.eye(4)  # transform matrix from world to camera
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.last_tf = None
@@ -132,11 +178,6 @@ class PcdToPlyPause(Node):
         # active check
         self.t_last_pcd = self.get_clock().now()
 
-    def __del__(self):
-        print('del')
-        if not os.listdir(self.output_folder):
-            os.rmdir(self.output_folder)
-
     def pcd_callback(self, msg):
         if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
             # save pcd to ply
@@ -144,7 +185,7 @@ class PcdToPlyPause(Node):
             p.start()
             exit()
         from_frame = 'world'
-        to_frame = 'depth_camera/link/depth_camera1'  # 'zed2_left_camera_frame'
+        to_frame = self.camera_tf_frame
 
         tf_steady = False
         try:
@@ -188,21 +229,28 @@ class PcdToPlyPause(Node):
             self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
 
             # crop
-            x_min, y_min, z_min = -1.3, -1.3, -0.3
-            x_max, y_max, z_max = 2.5, 3.0, 1.5
+            x_min, y_min = -self.x_width / 2, -self.y_width / 2
+            x_max, y_max = self.x_width / 2, self.y_width / 2
+
             bounding_polygon = np.array([
-                [x_min, 0.0, z_min],
-                [x_min, 0.0, z_max],
-                [x_max, 0.0, z_max],
-                [x_max, 0.0, z_min]
+                [x_min, y_min, 0.0],
+                [x_min, y_max, 0.0],
+                [x_max, y_max, 0.0],
+                [x_max, y_min, 0.0]
             ]).astype("float64")
+
+            bounding_polygon = np.array(list(map(partial(rotate, theta=self.theta), bounding_polygon))).astype("float64")
+            bounding_polygon = np.array(list(map(partial(translate, off=(self.x_off, self.y_off)), bounding_polygon))).astype(
+                "float64")
+
             vol = o3d.visualization.SelectionPolygonVolume()
             vol.bounding_polygon = o3d.utility.Vector3dVector(bounding_polygon)
-            vol.axis_max = y_max
-            vol.axis_min = y_min
-            vol.orthogonal_axis = "Y"
+            vol.axis_max = self.z_max
+            vol.axis_min = self.z_min
+            vol.orthogonal_axis = "Z"
+
             self.o3d_pcd = vol.crop_point_cloud(self.o3d_pcd)
-            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=0.005)
+            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=self.voxel_size)
             self.complete_o3d_pcd += self.o3d_pcd
             self.vis.add_geometry(self.o3d_pcd)
 
@@ -210,10 +258,10 @@ class PcdToPlyPause(Node):
         self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))
         self.vis.add_geometry(self.camera)
         ctr = self.vis.get_view_control()
-        ctr.set_up((0, 0, 1))  # set the positive direction of the z-axis as the up direction
-        ctr.set_front((-1, 0, 0))  # set the negative direction of the x-axis toward you
-        ctr.set_lookat((0, 0, 1))  # set the original point as the center point of the window
-        ctr.set_zoom(0.5)
+        ctr.set_up(self.up_vector)  # set the positive direction of the z-axis as the up direction
+        ctr.set_front(self.front_vector)  # set the negative direction of the x-axis toward you
+        ctr.set_lookat(self.center)  # set the original point as the center point of the window
+        ctr.set_zoom(self.zoom)
 
         self.vis.poll_events()
         self.vis.update_renderer()
