@@ -106,6 +106,49 @@ def translate(pt, off):
     return pt[0] + off[0], pt[1] + off[1], pt[2]
 
 
+def crop(pcd, x_width=0.65, y_width=2.0, theta=0, x_off=1.2, y_off=0.0, z_min=-0.15, z_max=1.2):
+    origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+
+    x_min, y_min = -x_width/2, -y_width/2
+    x_max, y_max = x_width/2, y_width/2
+
+    bounding_polygon = np.array([
+        [x_min, y_min, 0.0],
+        [x_min, y_max, 0.0],
+        [x_max, y_max, 0.0],
+        [x_max, y_min, 0.0]
+    ]).astype("float64")
+
+    bounding_polygon = np.array(list(map(partial(rotate, theta=theta), bounding_polygon))).astype("float64")
+    bounding_polygon = np.array(list(map(partial(translate, off=(x_off, y_off)), bounding_polygon))).astype("float64")
+
+    vol = o3d.visualization.SelectionPolygonVolume()
+    vol.bounding_polygon = o3d.utility.Vector3dVector(bounding_polygon)
+    vol.axis_max = z_max
+    vol.axis_min = z_min
+    vol.orthogonal_axis = "Z"
+
+    axs = []
+    for poly in bounding_polygon:
+        poly[2] = z_min
+        axis = copy.deepcopy(origin).translate(poly)
+        R = axis.get_rotation_matrix_from_xyz((0, 0, theta))
+        axis.rotate(R, center=poly)
+        axs.append(axis)
+        poly[2] = z_max
+        axis = copy.deepcopy(origin).translate(poly)
+        R = axis.get_rotation_matrix_from_xyz((0, 0, theta))
+        axis.rotate(R, center=poly)
+        axs.append(axis)
+
+    try:
+        cropped = vol.crop_point_cloud(pcd)
+    except TypeError:
+        cropped = vol.crop_triangle_mesh(pcd)
+
+    return cropped
+
+
 class PcdToPlyPause(Node):
     def __init__(self):
         super().__init__('pcd_to_ply_pause_node')
@@ -157,8 +200,7 @@ class PcdToPlyPause(Node):
 
         # create output folder
         dt_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.output_folder = f'{os.getcwd()}/data/{dt_str}'
-        os.mkdir(self.output_folder)
+        self.output_folder = f'{os.getcwd()}/data'
 
         # point cloud subscription
         self.pcd_subscriber = self.create_subscription(
@@ -216,44 +258,30 @@ class PcdToPlyPause(Node):
 
         if not np.array_equal(self.T_camera, np.eye(4)) and tf_steady:
             pcd = np.array(list(read_points(msg)))
-            points = pcd[:, :3]
-            rgb = pcd[:, 3]
-            r = np.array([(int(color * (1 << 16)) & 0xff) / 255 for color in rgb])
-            g = np.array([(int(color * (1 << 8)) & 0xff) / 255 for color in rgb])
-            b = np.array([(int(color) & 0xff) / 255 for color in rgb])
-            colors = np.array([r, g, b])
-            x, y = colors.shape
-            colors = np.reshape(colors, (y, x))
+            if not pcd.size == 0:
+                points = pcd[:, :3]
+                rgb = pcd[:, 3]
+                r = np.array([(int(color * (1 << 16)) & 0xff) / 255 for color in rgb])
+                g = np.array([(int(color * (1 << 8)) & 0xff) / 255 for color in rgb])
+                b = np.array([(int(color) & 0xff) / 255 for color in rgb])
+                colors = np.array([r, g, b])
+                x, y = colors.shape
+                colors = np.reshape(colors, (y, x))
 
-            self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
-            self.o3d_pcd.colors = o3d.utility.Vector3dVector(colors)
-            self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
+                self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+                self.o3d_pcd.colors = o3d.utility.Vector3dVector(colors)
+                self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
 
-            # crop
-            x_min, y_min = -self.x_width / 2, -self.y_width / 2
-            x_max, y_max = self.x_width / 2, self.y_width / 2
-
-            bounding_polygon = np.array([
-                [x_min, y_min, 0.0],
-                [x_min, y_max, 0.0],
-                [x_max, y_max, 0.0],
-                [x_max, y_min, 0.0]
-            ]).astype("float64")
-
-            bounding_polygon = np.array(list(map(partial(rotate, theta=self.theta), bounding_polygon))).astype("float64")
-            bounding_polygon = np.array(list(map(partial(translate, off=(self.x_off, self.y_off)), bounding_polygon))).astype(
-                "float64")
-
-            vol = o3d.visualization.SelectionPolygonVolume()
-            vol.bounding_polygon = o3d.utility.Vector3dVector(bounding_polygon)
-            vol.axis_max = self.z_max
-            vol.axis_min = self.z_min
-            vol.orthogonal_axis = "Z"
-
-            self.o3d_pcd = vol.crop_point_cloud(self.o3d_pcd)
-            self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=self.voxel_size)
-            self.complete_o3d_pcd += self.o3d_pcd
-            self.vis.add_geometry(self.o3d_pcd)
+                self.o3d_pcd = crop(
+                    self.o3d_pcd,
+                    x_width=self.x_width, y_width=self.y_width,
+                    theta=self.theta,
+                    x_off=self.x_off, y_off=self.y_off,
+                    z_min=self.z_min, z_max=self.z_max
+                )
+                self.o3d_pcd = self.o3d_pcd.voxel_down_sample(voxel_size=self.voxel_size)
+                self.complete_o3d_pcd += self.o3d_pcd
+                self.vis.add_geometry(self.o3d_pcd)
 
         self.vis.remove_geometry(self.camera)
         self.camera = copy.deepcopy(self.map).transform(np.linalg.inv(self.T_camera))

@@ -2,15 +2,15 @@
   ros__parameters:
     pcd_topic: '/depth_camera/points'                   # for sim: '/depth_camera/points', for real: '/zed2/zed_node/point_cloud/cloud_registered'
     camera_tf_frame: 'depth_camera/link/depth_camera1'  # for sim: 'depth_camera/link/depth_camera1', for real: 'zed2_left_camera_frame'
-    voxel_size: 0.001
+    voxel_size: 0.002
 
     cropping:
         x_width: 0.3                                    # width of the specimen in x direction (forward-backward) in meters
-        y_width: 1.5                                    # width of the specimen in y direction (left-right) in meters
+        y_width: 1.525                                    # width of the specimen in y direction (left-right) in meters
         theta: 0.0                                      # rotation around z-axis as radians
-        x_off: 1.2                                      # offset in x direction (forward-backward) in meters
+        x_off: 1.0                                      # offset in x direction (forward-backward) in meters
         y_off: -0.025                                   # offset in y direction (left-right) in meters
-        z_min: -0.22                                    # lower limit for height in meters
+        z_min: -0.15                                    # lower limit for height in meters
         z_max: 0.75                                     # upper limit for height in meters
 
     vis_camera:
