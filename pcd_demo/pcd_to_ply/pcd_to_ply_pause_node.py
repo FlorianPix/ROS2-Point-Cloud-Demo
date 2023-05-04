@@ -14,6 +14,7 @@ import rclpy
 from rclpy.node import Node
 import sensor_msgs.msg as sensor_msgs
 from sensor_msgs.msg import PointCloud2, PointField
+from std_msgs.msg import Bool
 
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
@@ -119,8 +120,8 @@ def crop(pcd, x_width=0.65, y_width=2.0, theta=0, x_off=1.2, y_off=0.0, z_min=-0
         [x_max, y_min, 0.0]
     ]).astype("float64")
 
-    bounding_polygon = np.array(list(map(partial(rotate, theta=theta), bounding_polygon))).astype("float64")
     bounding_polygon = np.array(list(map(partial(translate, off=(x_off, y_off)), bounding_polygon))).astype("float64")
+    bounding_polygon = np.array(list(map(partial(rotate, theta=theta), bounding_polygon))).astype("float64")
 
     vol = o3d.visualization.SelectionPolygonVolume()
     vol.bounding_polygon = o3d.utility.Vector3dVector(bounding_polygon)
@@ -146,7 +147,7 @@ def crop(pcd, x_width=0.65, y_width=2.0, theta=0, x_off=1.2, y_off=0.0, z_min=-0
     except TypeError:
         cropped = vol.crop_triangle_mesh(pcd)
 
-    return cropped
+    return axs, cropped
 
 
 class PcdToPlyPause(Node):
@@ -196,6 +197,21 @@ class PcdToPlyPause(Node):
         self.map = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
         self.vis.add_geometry(self.map)
         self.vis.add_geometry(self.complete_o3d_pcd)
+        axs, self.o3d_pcd = crop(
+            self.o3d_pcd,
+            x_width=self.x_width, y_width=self.y_width,
+            theta=self.theta,
+            x_off=self.x_off, y_off=self.y_off,
+            z_min=self.z_min, z_max=self.z_max
+        )
+        self.vis.add_geometry(axs[0])
+        self.vis.add_geometry(axs[1])
+        self.vis.add_geometry(axs[2])
+        self.vis.add_geometry(axs[3])
+        self.vis.add_geometry(axs[4])
+        self.vis.add_geometry(axs[5])
+        self.vis.add_geometry(axs[6])
+        self.vis.add_geometry(axs[7])
         self.camera = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
 
         # create output folder
@@ -215,18 +231,19 @@ class PcdToPlyPause(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.last_tf = None
-        self.timer = self.create_timer(0.1, self.timer_callback)
+        # self.timer = self.create_timer(0.1, self.timer_callback)
 
         # active check
         self.t_last_pcd = self.get_clock().now()
 
+        self.finished_subscriber = self.create_subscription(
+            Bool,  # Msg type
+            "/finished",  # topic
+            self.finished_callback,  # callback function
+            10  # QoS
+        )
+
     def pcd_callback(self, msg):
-        start_t = self.get_clock().now()
-        if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
-            # save pcd to ply
-            p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
-            p.start()
-            exit()
         from_frame = 'world'
         to_frame = self.camera_tf_frame
 
@@ -272,7 +289,7 @@ class PcdToPlyPause(Node):
                 self.o3d_pcd.colors = o3d.utility.Vector3dVector(colors)
                 self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
 
-                self.o3d_pcd = crop(
+                _, self.o3d_pcd = crop(
                     self.o3d_pcd,
                     x_width=self.x_width, y_width=self.y_width,
                     theta=self.theta,
@@ -294,13 +311,10 @@ class PcdToPlyPause(Node):
 
         self.vis.poll_events()
         self.vis.update_renderer()
-        end_t = self.get_clock().now()
-        self.get_logger().info(f'{len(self.complete_o3d_pcd.points)}')
-        self.get_logger().info(f'{end_t - start_t}')
 
-    def timer_callback(self):
-        if (self.get_clock().now() - self.t_last_pcd) > rclpy.duration.Duration(seconds=5.0):
-            # save pcd to ply
+    def finished_callback(self, msg):
+        self.get_logger().info('finished')
+        if msg.data:
             p = Process(target=self.write_pcd, args=(self.complete_o3d_pcd, self.output_folder))
             p.start()
             exit()
