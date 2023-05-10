@@ -35,7 +35,7 @@ class PCDListener(Node):
     def __init__(self):
         super().__init__('pcd_subsriber_node')
 
-        self.pcd_topic = '/depth_camera/points'  # '/zed2/zed_node/point_cloud/cloud_registered'
+        self.pcd_topic = '/zed2/zed_node/point_cloud/cloud_registered'  # '/depth_camera/points'
 
         # visualisation init
         self.vis = o3d.visualization.Visualizer()

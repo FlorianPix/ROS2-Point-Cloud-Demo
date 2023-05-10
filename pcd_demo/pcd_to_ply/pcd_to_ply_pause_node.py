@@ -15,6 +15,7 @@ from rclpy.node import Node
 import sensor_msgs.msg as sensor_msgs
 from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Bool
+from sensor_msgs_py import point_cloud2
 
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
@@ -78,7 +79,7 @@ def read_points(cloud, field_names=None):
                     has_inf = True
                     break
             if not has_nan and not has_inf:
-                yield p[0], p[1], p[2], p[3] * math.pow(10, 40) / 256
+                yield p[0], p[1], p[2]
             offset += point_step
 
 
@@ -274,19 +275,9 @@ class PcdToPlyPause(Node):
         self.t_last_pcd = self.get_clock().now()
 
         if not np.array_equal(self.T_camera, np.eye(4)) and tf_steady:
-            pcd = np.array(list(read_points(msg)))
+            pcd = np.array(list(point_cloud2.read_points(msg)))
             if not pcd.size == 0:
-                points = pcd[:, :3]
-                rgb = pcd[:, 3]
-                r = np.array([(int(color * (1 << 16)) & 0xff) / 255 for color in rgb])
-                g = np.array([(int(color * (1 << 8)) & 0xff) / 255 for color in rgb])
-                b = np.array([(int(color) & 0xff) / 255 for color in rgb])
-                colors = np.array([r, g, b])
-                x, y = colors.shape
-                colors = np.reshape(colors, (y, x))
-
-                self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
-                self.o3d_pcd.colors = o3d.utility.Vector3dVector(colors)
+                self.o3d_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd[:, :3]))
                 self.o3d_pcd = self.o3d_pcd.transform(np.linalg.inv(self.T_camera))
 
                 _, self.o3d_pcd = crop(
