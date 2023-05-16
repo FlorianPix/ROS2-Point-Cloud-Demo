@@ -1,0 +1,20 @@
+/pcd_to_ply_pause_node:
+  ros__parameters:
+    pcd_topic: '/zed2/zed_node/point_cloud/cloud_registered'                   # for sim: '/depth_camera/points', for real: '/zed2/zed_node/point_cloud/cloud_registered'
+    camera_tf_frame: 'zed2_left_camera_frame'  # for sim: 'depth_camera/link/depth_camera1', for real: 'zed2_left_camera_frame'
+    voxel_size: 0.002
+
+    cropping:
+        x_width: 0.4                                    # width of the specimen in x direction (forward-backward) in meters
+        y_width: 0.4                                    # width of the specimen in y direction (left-right) in meters
+        theta: 0.785398163                                     # rotation around z-axis as radians
+        x_off: 0.8                                     # offset in x direction (forward-backward) in meters
+        y_off: 0.0                                   # offset in y direction (left-right) in meters
+        z_min: -0.1                                    # lower limit for height in meters
+        z_max: 0.05                                     # upper limit for height in meters
+
+    vis_camera:
+        up_vector: [0.0, 0.0, 1.0]
+        front_vector: [-1.0, -1.0, -0.1]
+        center: [0.0, 0.0, 0.5]
+        zoom: 0.5
