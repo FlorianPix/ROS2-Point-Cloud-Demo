@@ -263,7 +263,7 @@ class PcdToPlyPause(Node):
             return
 
         self.T_camera = np.eye(4)
-        self.T_camera[:3, :3] = self.map.get_rotation_matrix_from_quaternion((
+        self.T_camera[:3, :3] = o3d.geometry.get_rotation_matrix_from_quaternion((
             t.transform.rotation.w,
             t.transform.rotation.x,
             t.transform.rotation.y,
