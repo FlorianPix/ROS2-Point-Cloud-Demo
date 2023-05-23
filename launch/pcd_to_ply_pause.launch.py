@@ -12,7 +12,6 @@ def generate_launch_description():
         'config',
         'pcd_to_ply_pause.yaml'
     )
-    print(config)
     return LaunchDescription([
         Node(
             package='pcd_demo',
