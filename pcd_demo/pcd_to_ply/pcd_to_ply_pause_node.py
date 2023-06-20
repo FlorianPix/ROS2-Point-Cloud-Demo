@@ -215,7 +215,7 @@ class PcdToPlyPause(Node):
         self.voxel_size = self.get_parameter('down_sampling.voxel_size').get_parameter_value().double_value
         self.do_pre_processing = self.get_parameter(
             'pre_processing.do_pre_processing').get_parameter_value().bool_value
-        self.nb_neighbors = self.get_parameter('pre_processing.nb_neighbors').get_parameter_value().double_value
+        self.nb_neighbors = self.get_parameter('pre_processing.nb_neighbors').get_parameter_value().integer_value
         self.std_ratio = self.get_parameter('pre_processing.std_ratio').get_parameter_value().double_value
         self.nb_points = self.get_parameter('pre_processing.nb_points').get_parameter_value().double_value
         self.radius = self.get_parameter('pre_processing.radius').get_parameter_value().double_value

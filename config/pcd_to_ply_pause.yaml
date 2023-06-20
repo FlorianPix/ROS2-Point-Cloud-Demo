@@ -1,10 +1,10 @@
 /pcd_to_ply_pause_node:
   ros__parameters:
-    pcd_topic: '/depth_camera/points'                   # for sim: '/depth_camera/points', for real: '/zed2/zed_node/point_cloud/cloud_registered'
-    camera_tf_frame: 'depth_camera/link/depth_camera1'  # for sim: 'depth_camera/link/depth_camera1', for real: 'zed2_left_camera_frame'
+    pcd_topic: '/zed2/zed_node/point_cloud/cloud_registered' # for sim: '/depth_camera/points', for real: '/zed2/zed_node/point_cloud/cloud_registered'
+    camera_tf_frame: 'zed2_left_camera_frame'  # for sim: 'depth_camera/link/depth_camera1', for real: 'zed2_left_camera_frame'
 
     cropping:
-        do_cropping: false
+        do_cropping: True
         x_width: 1.0                                    # width of the specimen in x direction (forward-backward) in meters
         y_width: 1.0                                    # width of the specimen in y direction (left-right) in meters
         theta: 0.785398163                                     # rotation around z-axis as radians

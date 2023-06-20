@@ -12,7 +12,7 @@ from os import path, mkdir
 
 
 def pcd_to_mesh(
-        file_path='/home/florianpix/git_repos/3Dscan/ros2_ws/data/2023-05-23_10-11-44-925985',
+        file_path='/home/florianpix/git_repos/3Dscan/ros2_ws/data/2023-06-20_14-18-06-342210',
         do_cropping=True,
         do_down_sampling=True,
         do_pre_processing=True,
@@ -133,7 +133,7 @@ def pcd_to_mesh(
 
 
 if __name__ == "__main__":
-    with open('config/default.yml', 'r') as config_file:
+    with open('/home/florianpix/git_repos/3Dscan/ros2_ws/src/ROS2-Point-Cloud-Demo/config/default.yml', 'r') as config_file:
         config = yaml.safe_load(config_file)
         pcd_to_mesh(file_path=config['path'],
              do_cropping=config['cropping']['do_cropping'],

@@ -1,0 +1,41 @@
+path: '/home/florianpix/git_repos/3Dscan/ros2_ws/data/2023-06-20_15-14-31-924028/raw'  # name of the ply file without '.ply' ending
+
+cropping:
+    do_cropping: True
+    x_width: 0.4                                    # width of the specimen in x direction (forward-backward) in meters
+    y_width: 1.6                                    # width of the specimen in y direction (left-right) in meters
+    theta: 0.785398163                                     # rotation around z-axis as radians
+    x_off: 0.9                                     # offset in x direction (forward-backward) in meters
+    y_off: 0.0                                   # offset in y direction (left-right) in meters
+    z_min: -0.15                                    # lower limit for height in meters
+    z_max: 0.825                                     # upper limit for height in meters
+
+down_sampling:
+  do_down_sampling: True        # set this to True if you want to down sample the point cloud
+  voxel_size: 0.003             # size of a voxel in meters
+
+pre_processing:
+  do_pre_processing: False       # set this to True if you want to pre-process the point cloud
+  nb_neighbors: 20              # number of neighbors taken into account to calculate the average distance for a given point
+  std_ratio: 10.0                # threshold based on the standard deviation of the average distances
+  nb_points: 20                  # lower threshold for number of neighbor-points within radius
+  radius: 0.01                  # radius to consider around each point for noise reduction
+  eps: 0.01                     # density parameter [0,1] that is used to find neighbouring points; a lower value leads to more clusters
+  min_points: 10                # minimum number of points to form a cluster; a lower value leads to more clusters
+
+alpha:
+  do_alpha: True                # set this to True if you want to do alpha surface reconstruction of the point cloud
+  alpha: 0.05                   # lower values lead to more details but also a higher probability of holes
+
+normal_estimation:
+  radius: 0.005                     # radius within neighbors are considered - lower values
+  max_nn: 40                    # maximum number of neighbors to consider - limits complexity
+
+ball_pivoting:
+  do_ball_pivoting: False       # set this to True if you want to do ball pivoting surface reconstruction of the point cloud
+  radii: [0.005, 0.01, 0.02]        # lower values lead to more details but also a higher probability of holes; combining low and high values can improve this; high values need to consider more points which leads to longer computation time
+
+poisson:
+  do_poisson: False              # set this to True if you want to do poisson surface reconstruction of the point cloud
+  depth: 12                      # depth of the octree - higher depth leads to higher resolution but requires more computation and RAM
+  quantile: 0.1
